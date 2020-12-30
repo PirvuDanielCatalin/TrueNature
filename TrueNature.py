@@ -1,125 +1,214 @@
-from asyncio.windows_events import NULL
 import platform
 import yaml
 import os
 import time
-
+import re
 import subprocess
 import pyshark
 import requests
 
-from pprint import pprint
-# import numpy as np
-
-print('\n')
+print("\n")
 
 # Show the OS properties and the initial config of the app
 print("The current OS is " + platform.system())
-print('\n')
+print("\n")
 
 print("The current config is :")
 
-with open('Config.yml', 'r') as file:
+with open("Config.yml", "r") as file:
     full_config = yaml.full_load(file)
 
 for item, doc in full_config.items():
-    print(' ' + item, ':', doc)
+    print(" " + item, ":", doc)
 
-if not full_config['reports_path']:
-    full_config['reports_path'] = input("Please set the path the reports should be stored! ")
+print("\n")
 
-print('\n')
+if not full_config["reports_path"]:
+    print("Please set the path in config file where the reports should be stored!")
+    print("\n")
+    quit()
+
+if not os.path.isdir(full_config["reports_path"]):
+    print("Please set a correct actual directory path!")
+    print("\n")
+    quit()
+
+print("\n")
 
 # Save the config back into the file
-with open('Config.yml', 'w') as file:
+with open("Config.yml", "w") as file:
     dump_config = yaml.dump(full_config, file)
 
 # Show all the network interfaces
-network_interfaces = subprocess.Popen(['tshark', '-D'], stdout=subprocess.PIPE, universal_newlines=True)
+network_interfaces = subprocess.Popen(["tshark", "-D"], stdout=subprocess.PIPE, universal_newlines=True)
+network_interfaces.wait()
+network_interfaces_count = 0
+network_interfaces_output = []
 
+interface_choices = []
+interface_choice = ""
+
+# Print and construct the list of choices for the network interface
+print("The list of your network interfaces is:")
 for output in network_interfaces.stdout.readlines():
     print(output.strip())
+    network_interfaces_output.append(output.strip())
 
-print('\n')
+    if platform.system() == "Windows":
+        network_interfaces_count = network_interfaces_count + 1
+
+    elif platform.system() == "Linux":
+        tmp = re.search('(.*?\. )([a-z0-9]+)( .*)?', output.strip())
+        if tmp:
+            interface_choices.append(tmp.group(2))
+
+if platform.system() == "Windows":
+    interface_choices = [str(x) for x in range(1, network_interfaces_count + 1)]
+
+print("\n")
+try:
+    # Make the choice of network interface
+    while True:
+        if interface_choice not in interface_choices:
+            if platform.system() == "Windows":
+                interface_choice = input(
+                    "Please type the number of the interface you want to sniff the traffic from! : ")
+            elif platform.system() == "Linux":
+                interface_choice = input("Please type the name of the interface you want to sniff the traffic from! : ")
+        else:
+            tmp_choice = interface_choice
+            if platform.system() == "Windows":
+                tmp_choice = network_interfaces_output[int(interface_choice) - 1]
+
+            print("\n")
+            print("You chose the interface: " + tmp_choice)
+            print("\n")
+            break
+except:
+    print("\n")
+    quit()
 
 # Constructing the traffic filter
-traffic_filter = '(dns.response_to)'
+traffic_filter = "(dns.response_to)"
 
-for iter_domain in full_config['domains_excluded']:
-    traffic_filter += ' and (not dns.resp.name contains ' + iter_domain + ')'
+for iter_domain in full_config["domains_excluded"]:
+    traffic_filter += " and (not dns.resp.name contains " + iter_domain + ")"
 
-for iter_host in full_config['hosts_excluded']:
-    traffic_filter += ' and (not dns.resp.name eq ' + iter_host + ')'
+for iter_host in full_config["hosts_excluded"]:
+    traffic_filter += " and (not dns.resp.name eq " + iter_host + ")"
 
 print("The traffic filter constructed is \n" + traffic_filter)
-print('\n')
+print("\n")
 
 # Start capturing the traffic and get new hosts to test
-capture = NULL
+final_possible_new_exceptions = []
+checked_domains = []
+capture = None
+current_domains_results = []
 current_results = []
+
 
 def dns_info(packet):
     if packet.dns.qry_name:
-        print(packet.dns.qry_name)
+        current_domains_results.append(packet.dns.qry_name)
     elif packet.dns.resp_name:
-        print(packet.dns.resp_name)
+        current_domains_results.append(packet.dns.resp_name)
 
-    current_results.append(packet.dns.resp_name)
 
 try:
-    while True:
-        try:
-            capture = pyshark.LiveCapture('6', display_filter = traffic_filter)
+    try:
+        while True:
+            try:
+                capture = pyshark.LiveCapture(interface_choice, display_filter=traffic_filter)
 
-            capture.sniff(packet_count=100)
+                capture.sniff(packet_count=100)
 
-            capture.apply_on_packets(dns_info, timeout=20)
-            # Generates an error after the timeout passes
+                capture.apply_on_packets(dns_info, timeout=2)
+                # Generates an error after the timeout passes
 
-            print("\nPas1\n")
+            except Exception as e:
+                # time.sleep(300)
+                time.sleep(5)
 
-            # capture.close()
-            # time.sleep(300)
-            time.sleep(10)
+                print("Currently extracted sites : ")
+                for current_domain_result in current_domains_results:
+                    print(" - " + current_domain_result)
 
-            print("\nPas2\n")
+                print("\n")
 
-            print(current_results)
+                for current_domain_result in current_domains_results:
+                    current_output_dir = full_config["reports_path"] + current_domain_result
 
-            print("\nPas3\n")
+                    if not os.path.isdir(current_output_dir) and current_domain_result not in checked_domains:
+                        r = requests.get("http://" + current_domain_result)
+                        if r.status_code == 200:
+                            # Add the extracted URL only if it is accessible
+                            current_results.append(
+                                {"dns": current_domain_result, "url": r.url, "path": current_output_dir})
+                            checked_domains.append(current_domain_result)
+                        # else: Site can"t be accessed!
+                    # else: Site has been scanned before!
 
-            for current_result in current_results:
-                if os.path.isdir(full_config['reports_path'] + current_result):
-                    print("Check the site " + current_result)
+                if len(current_results) > 0:
+                    ctr = 1
+                    print("\n")
+                    print("New possible data from which to extract new exceptions:")
+                    print("\n")
+                    for current_result in current_results:
+                        print(str(ctr))
+                        print(" - Dns: " + current_result["dns"])
+                        print(" - Url: " + current_result["url"])
+                        print(" - Path: " + current_result["path"])
+                        print("\n")
+                        ctr = ctr + 1
+                        final_possible_new_exceptions.append(current_result["dns"])
 
-                    r = requests.get('http://' + current_result)
-                    if (r.status_code == 200):
-                        print('## Aici trebuie call de Wapiti cu slash la final')
-                        print('# wapiti -u URL_packet.dns.qry_name -v 2 -o "path" >> log')
-                    else:
-                        print("Site can't be accessed!")
+                    current_procs = []
+                    for current_result in current_results:
+                        # proc = subprocess.Popen(
+                        #     ["wapiti", "-u " + current_result["url"], "-o " + current_result["path"]])
+                        # current_procs.append(proc)
+                        print("\n")
+                        print("Wapiti command")
 
+                    # for current_proc in current_procs:
+                    #     current_proc.wait()
                 else:
-                    print("Site has been scanned before!")
+                    print("There are no new possible exceptions to be added!")
 
-            print("\nPas4\n")
+                current_domains_results = []
+                current_results = []
+                capture.close()
 
-            time.sleep(10)
+                time.sleep(5)
+                # time.sleep(300)
 
-        except Exception as e:
-            print("\nPas eroare\n")
-            print('\n')
+                continue
 
-            print(str(e))
+    except:
 
-            print('\n')
+        print("\n")
+        print("The program has been stopped.")
+        print("Please check the reports directory.")
+        print("\n")
+        if final_possible_new_exceptions is not None and len(final_possible_new_exceptions) > 0:
+            print("The new possible exceptions to be added in the host area are:")
+            for final_possible_new_exception in final_possible_new_exceptions:
+                print(" - " + final_possible_new_exception)
+        else:
+            print("There are no new possible exceptions to be added in the host area")
+        print("\n")
 
-            print(current_results)
-
-            print("\nPas5\n")
-
-
-            capture.close()
-            continue
 except:
-    print("Hopa Penelopa")
+
+    print("\n")
+    print("The program has been stopped.")
+    print("Please check the reports directory.")
+    print("\n")
+    if final_possible_new_exceptions is not None and len(final_possible_new_exceptions) > 0:
+        print("The new possible exceptions to be added in the host area are:")
+        for final_possible_new_exception in final_possible_new_exceptions:
+            print(" - " + final_possible_new_exception)
+    else:
+        print("There are no new possible exceptions to be added in the host area")
+    print("\n")
