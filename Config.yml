@@ -1,0 +1,8 @@
+domains_excluded:
+- facebook
+- google
+- microsoft
+- youtube
+hosts_excluded:
+- scontent.ftce2-1.fna.fbcdn.net
+reports_path: D:\Facultate\Vagrant_VMs\SharedFolder\WapifiReports\
