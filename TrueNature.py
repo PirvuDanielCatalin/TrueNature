@@ -33,8 +33,6 @@ if not os.path.isdir(full_config["reports_path"]):
     print("\n")
     quit()
 
-print("\n")
-
 # Save the config back into the file
 with open("Config.yml", "w") as file:
     dump_config = yaml.dump(full_config, file)
@@ -103,6 +101,7 @@ print("\n")
 # Start capturing the traffic and get new hosts to test
 final_possible_new_exceptions = []
 checked_domains = []
+
 capture = None
 current_domains_results = []
 current_results = []
@@ -143,15 +142,25 @@ try:
                         r = requests.get("http://" + current_domain_result)
                         if r.status_code == 200:
                             # Add the extracted URL only if it is accessible
-                            current_results.append(
-                                {"dns": current_domain_result, "url": r.url, "path": current_output_dir})
-                            checked_domains.append(current_domain_result)
+
+                            tmp_url_result = None
+                            tmp_url = re.search('(.*?:\/\/.*?([\/\?]))(.*)', r.url)
+                            if tmp_url:
+                                tmp_url_result = tmp_url.group(1)
+                                tmp_url_result_final_char = tmp_url.group(2)
+                                if tmp_url_result_final_char == "?":
+                                    tmp_url_result = tmp_url_result[:-1] + "/"
+
+                            if tmp_url_result is not None:
+                                current_results.append(
+                                    {"dns": current_domain_result, "url": tmp_url_result, "path": current_output_dir})
+
+                        checked_domains.append(current_domain_result)
                         # else: Site can"t be accessed!
                     # else: Site has been scanned before!
 
                 if len(current_results) > 0:
                     ctr = 1
-                    print("\n")
                     print("New possible data from which to extract new exceptions:")
                     print("\n")
                     for current_result in current_results:
@@ -163,16 +172,24 @@ try:
                         ctr = ctr + 1
                         final_possible_new_exceptions.append(current_result["dns"])
 
-                    current_procs = []
-                    for current_result in current_results:
-                        # proc = subprocess.Popen(
-                        #     ["wapiti", "-u " + current_result["url"], "-o " + current_result["path"]])
-                        # current_procs.append(proc)
-                        print("\n")
-                        print("Wapiti command")
+                        # print("Wapiti command will start in another process for " + current_result["url"])
 
-                    # for current_proc in current_procs:
-                    #     current_proc.wait()
+                    # For each website found start the vulnerability scanner in another process
+                    current_commands = []
+                    current_procs = []
+
+                    for current_result in current_results:
+                        try:
+                            current_command = "wapiti -u " + current_result["url"] + " -o " + current_result["path"]
+                            current_proc = subprocess.Popen(current_command, shell=True, stdout=subprocess.PIPE,
+                                                            stderr=subprocess.PIPE,
+                                                            encoding='UTF-8')
+                            current_procs.append(current_proc)
+                        except Exception as e:
+                            print(str(e))
+
+                    for current_proc in current_procs:
+                        current_proc.wait()
                 else:
                     print("There are no new possible exceptions to be added!")
 
@@ -180,8 +197,9 @@ try:
                 current_results = []
                 capture.close()
 
-                time.sleep(5)
-                # time.sleep(300)
+                time.sleep(10)
+
+                print("\n")
 
                 continue
 
