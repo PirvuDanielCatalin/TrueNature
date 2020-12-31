@@ -9,4 +9,4 @@ hosts_excluded:
 - weather.opera-api.com
 - suggestions.opera-api.com
 - af.opera.com
-reports_path: D:\Facultate\Vagrant_VMs\SharedFolder\WapifiReports\
+reports_path: ''
