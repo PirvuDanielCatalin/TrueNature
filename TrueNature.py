@@ -1,9 +1,13 @@
 import platform
-import yaml
 import os
+
+import yaml
+
 import time
 import re
+
 import subprocess
+
 import pyshark
 import requests
 
@@ -97,7 +101,8 @@ for iter_host in full_config["hosts_excluded"]:
 
 print("The traffic filter constructed is \n" + traffic_filter)
 print("\n")
-
+print("Now the traffic capturing can start ")
+print("\n")
 # Start capturing the traffic and get new hosts to test
 final_possible_new_exceptions = []
 checked_domains = []
@@ -122,7 +127,7 @@ try:
 
                 capture.sniff(packet_count=100)
 
-                capture.apply_on_packets(dns_info, timeout=2)
+                capture.apply_on_packets(dns_info, timeout=5)
                 # Generates an error after the timeout passes
 
             except Exception as e:
@@ -171,8 +176,8 @@ try:
                         print("\n")
                         ctr = ctr + 1
                         final_possible_new_exceptions.append(current_result["dns"])
-
-                        # print("Wapiti command will start in another process for " + current_result["url"])
+                        print("Wapiti command will start in another process for " + current_result["url"])
+                        print("\n")
 
                     # For each website found start the vulnerability scanner in another process
                     current_commands = []
